@@ -139,7 +139,7 @@ TCP 为了保证可靠性，使用了基于字节序号的 Sequence Number 及 A
 
 QUIC解决了上面的歧义问题。与采用Sequence Number 标记不同的是，其使用的Packet Number标记严格单调递增，如果 Packet N 丢失了，那么重传时 Packet 的标识不会是 N，而是比 N 大的数字，比如N+M，这样发送方接收到确认消息时就能方便地知道 ACK 对应的是原始请求还是重传请求。
 
-### 2.5 Stream层
+## 2.5 Stream层
 &ensp;&ensp;&ensp;&ensp; Stream是一个抽象的概念，用以表示一个有序传输的数据流，而这些数据其实就是由Stream Frame排列构成。QUIC 使用帧（frames）进行端到端的通信。一个或多个帧（frame）被组装成一个 QUIC 包（packet）。在一个quic connection上，可以同时传输多条流，QUIC通过对多路传输的支持,解决了TCP中的队头阻塞问题。
 
 ![alt text](pic/quic/image10.png)
@@ -153,7 +153,7 @@ QUIC解决了上面的歧义问题。与采用Sequence Number 标记不同的是
 - Stream荷载
 
 &ensp;&ensp;&ensp;&ensp;Stream的荷载即为一系列Stream Frame，通过Stream Frame头部的Stream ID来确认单个流。在TCP里，如果一个segment传递丢失，那么后续segment乱序到达，也不会被应用层使用，只到丢失的segment重传成功为止，因此TCP实现的HTTP2的多路复用能力受到制约。在QUIC协议中，有序的概念仅维护在单个stream中，stream之间和packet都不要求有序，假设某个packet丢失，只会影响包含在这个包里的stream，其他stream仍然可以从后续乱序到达的packet中提取到自己所需要的数据交给应用层。
-### 2.6  流量控制
+## 2.6  流量控制
 
 &ensp;&ensp;&ensp;&ensp; 一般来说，接收方收到发送方的消息后都应该发送一个 ACK回复，表示收到了数据。但每收到一个数据就返回一个ACK 回复太麻烦，所以一般不会立即回复，而是接收到多个数据后再回复，TCP SACK 最多提供 3个 ACK block。但有些场景下，比如下载，只需要服务器返回数据就好，但按照 TCP 的设计，每收到 3 个数据包就要返回一个ACK。而QUIC 最多可以捎带 256 个ACK block。在丢包率比较严重的网络下，更多的 ACK block 可以减少返回包的量，提升网络效率。
 
