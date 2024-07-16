@@ -179,6 +179,11 @@ QUIC 的流量控制有两个级别：连接级别和Stream级别，用于表达
 
 ### 2.7.1 报文头格式
 
+为了推进Google QUIC的IETF标准化，在version46之后将Header分成两种不同的类型，在1RTT连接建立和版本协商成功之前的packets使用Long Header,其余的时候Short-Header。
+- 带有长报头的数据包包括 Initial、0-RTT、Handshake和Retry;
+- 版本协商使用具有长头的版本独立包;
+- 带有短报头的数据包被设计为最小的开销，并在一个连接建立和1-RTT keys可用后使用.
+
 ```
 Long Header Packet{
   Header Form(1) = 1,   //1标识长报文头
@@ -202,21 +207,25 @@ Short Header Packet{
 }
 ```
 
-### 2.7.2 短报文头-Stream格式
-
-![alt text](pic/quic/quic_package.drawio.svg)
-
-数据帧有很多类型：Stream、ACK、Padding、Window_Update、Blocked 等，这里重点介 绍下用于传输应用数据的 Stream 帧。
-
-![alt text](pic/quic/image11.png)
 
 
+### 2.7.2 长报文头报文格式
 
-#### Frame Type
 
-  帧类型，占用 1 个字节
+### 2.7.3 短报文头报文格式
 
-![alt text](pic/quic/image12.png)
+#### 报文头格式
+
+基于短报文头格式的Quic包都是以一个14~19字节的公共头开始的，如下图所示：
+
+![alt text](pic/quic/quic_stream.drawio.svg)
+
+其中Header是明文，Data域是加密数据
+
+
+Public Flags:
+
+![alt text](pic/quic/quic_frame_type.drawio.svg)
 
 - Bit7：必须设置为 1，表示 Stream 帧，一个udp通道可以发送多个流
 - Bit6：如果设置为 1，表示发送端在这个 stream 上已经结束发送数据，流将处于半关闭状态
@@ -224,9 +233,28 @@ Short Header Packet{
 - Bit4~3~2：表示 offset 的长度。000 表示 0 字节，001 表示 2 字节，010 表示 3 字节，以此类推
 - Bit1~0：表示 Stream ID 的长度。00 表示 1 字节，01 表示 2 字节，10 表示 3 字节，11 表示 4 字 节
 
-#### Payload
 
-![alt text](pic/quic/image13.png)
+connection ID:  64位无符号整型，由client随机产生,用来标识一个连接, 之所以使用Connection ID而不使用四元组标识（源 IP，源端口，目的 IP，目的端口），是为了就算 IP 或者端口发生变化时，只要 ID 不变，这条连接依旧可以维持，上层业务逻辑感知不到变化，不会中断，也就不需要重连。
+
+Quic Version : 32位,用来表示Quic 协议版本.只有当PUBLIC_FLAG_VERSION 被设置才会存在这个字段。server 只有在不支持客户端携带的版本时，才会设置PUBLIC_FLAG_VERSION并且其后不会再附带其他信息(也就是版本协商包)。     
+
+Packet Number : 可能为8,16,32,48位的packet number,具体的长度由public flags决定 。每个常规包(Regular Packet)都会被分配一个packet number, 各端发送的第一个包的packet number是1，之后的数据包中的packet number都会大于前一个包的packet number(单调递增)
+
+
+数据帧有很多类型：Stream、ACK、Padding、Window_Update、Blocked 等。包含帧的数据包的有效负载至少包含一个帧，可以含多个帧和多个帧类型。端点将不包含帧的数据包的接收视为PROTOCOL_VIOLATION类型的连接错误。帧总是包含在一个QUIC包中，并且不能跨越多个包。每个帧以帧类型开始表明其类型，后面跟其他与该帧类型相关的字段。
+
+- 帧类型举例
+  
+|Type-field | Frame-type|
+| ---- | ---- |
+0x00|PADDING
+0x01|PING
+0x02-0x03 |ACK
+0x04|RESET_STREAM
+0x05| STOP_SENDING
+0x06|CRYPTO
+0x07|NEW_TOKEN
+
 
 - Stream ID：流 ID，用于标识数据包所属的流。后面的流量控制和多路复用会涉及到。
 - Offset：偏移量，表示该数据包在整个数据中的偏移量，用于数据排序。
