@@ -204,7 +204,7 @@ Short Header Packet{
 
 ### 2.7.2 短报文头-Stream格式
 
-
+![alt text](pic/quic/quic_package.drawio.svg)
 
 数据帧有很多类型：Stream、ACK、Padding、Window_Update、Blocked 等，这里重点介 绍下用于传输应用数据的 Stream 帧。
 
