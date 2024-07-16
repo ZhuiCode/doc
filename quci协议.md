@@ -174,3 +174,60 @@ QUIC 的流量控制有两个级别：连接级别和Stream级别，用于表达
     针对connection：可用窗口数 = stream1可用窗口数+ … + streamN可用窗口数
 
 &ensp;&ensp;&ensp;&ensp;QUIC 的流量控制和TCP 有点区别，TCP为了保证可靠性，窗口左边沿向右滑动时的长度取决于已经确认的字节数。如果中间出现丢包，就算接收到了更大序号的Segment，窗口起始changdu也无法超过这个序列号。 QUIC 不同，就算此前有些 packet 没有接收到，它的滑动窗口也只取决于接收到的最大偏移字节数。
+
+## 2.7 QUIC报文格式
+
+### 2.7.1 报文头格式
+
+```
+Long Header Packet{
+  Header Form(1) = 1,   //1标识长报文头
+  Version-Specific Bits(7),
+  Version (32),                           // 端点可以使用此值来标识QUIC版本，保留0x0000000000用于版本协商
+  Destination Connection ID Length(8),    //目标连接ID长度，8位无符号整形
+  Destination Connection ID(0..2040),     //目标连接ID，0-255个字节
+  Source Connection ID Length(8),         //源连接ID长度，8位无符号整
+  Source Connection ID(0..2040),          //源连接ID，0-255个字节
+  Version-Specific Data (..)              //特定于版本的内容
+}
+```
+
+
+```
+Short Header Packet{
+  Header Form(1) = 0,   //1标识长报文头
+  Version-Specific Bits(7),
+  Destination Connection ID(..),
+  Version-Specific Data (..)
+}
+```
+
+### 2.7.2 短报文头-Stream格式
+
+
+
+数据帧有很多类型：Stream、ACK、Padding、Window_Update、Blocked 等，这里重点介 绍下用于传输应用数据的 Stream 帧。
+
+![alt text](pic/quic/image11.png)
+
+
+
+#### Frame Type
+
+  帧类型，占用 1 个字节
+
+![alt text](pic/quic/image12.png)
+
+- Bit7：必须设置为 1，表示 Stream 帧，一个udp通道可以发送多个流
+- Bit6：如果设置为 1，表示发送端在这个 stream 上已经结束发送数据，流将处于半关闭状态
+- Bit5：如果设置为 1，表示 Stream 头中包含 Data length 字段
+- Bit4~3~2：表示 offset 的长度。000 表示 0 字节，001 表示 2 字节，010 表示 3 字节，以此类推
+- Bit1~0：表示 Stream ID 的长度。00 表示 1 字节，01 表示 2 字节，10 表示 3 字节，11 表示 4 字 节
+
+#### Payload
+
+![alt text](pic/quic/image13.png)
+
+- Stream ID：流 ID，用于标识数据包所属的流。后面的流量控制和多路复用会涉及到。
+- Offset：偏移量，表示该数据包在整个数据中的偏移量，用于数据排序。
+- Data Length： 数据长度，占用 2 个字节，表示实际应用数据的长度 Data： 实际的应用数据。
