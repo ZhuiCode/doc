@@ -11,6 +11,7 @@ TCP将上层的数据看做是一串无序的字节流，会按照一定的大�
 实际上，HTTP将TCP作为下层的协议，它在1.1/2.0等版本中做了大量的工作，试图提高HTTP的效率，但是受限于TCP固有的特性，难以取得突破。
 ## 1.2 TCP 可靠传输原理
 TCP通过序号、确认、重传来保证可靠传输。
+
 ![alt text](./pic/quic/tcp_ack.drawio.svg)
 
 TCP端到端之间，采用缓冲区来暂存正在发送的数据，一旦数据发送出现问题（丢包导致的超时、冗余ACK等等），TCP发送端能够及时地从缓冲区中选择数据重发。
@@ -18,6 +19,7 @@ TCP为每一个TCP报文分配一个序号 seq = a，接收方接收到序号为
 ## 1.3 TCP存在的一些问题
 ### 1.3.1 TCP连接耗时严重
 我们知道，基于TCP的HTTP/2链接，需要经过三次握手，这时候消耗掉一个RTT（如下图1），而HTTPs在TCP的基础上，又使用了TLS1.2进行数据加密（如下图4、5），需要消耗2个RTT，这样一来，在建立连接时，光是TCP + TLS过程就需要消耗掉3个RTT的时间。
+
 ![alt text](pic/quic/image2.png)
 
 这其中最大的问题就是，TCP的确认帧需要经过一个完整的RTT才可能被接收到，而TCP一个时刻发送的数据的数量会被拥塞窗口所限制，假设ssthresh设置为16，那么甚至需要5个RTT才能跑满基础的拥塞窗口，如果现实网络会在32时产生拥塞，那么根据拥塞避免算法，需要5 + 16个RTT才能最大化利用网络的带宽和吞吐量。
@@ -35,6 +37,7 @@ TCP的处理依赖于操作系统，我们难以对它进行升级。虽然TCP�
 但是这个空间不仅仅不够用，而且一些系统的防火墙会将Options中的一些字段信息过滤掉，这是我们应用层难以控制的。
 ### 1.3.5 TCP队头堵塞的问题
 由于TCP必须在一个请求的所有分片完成之后，才能将所有的数据提交给上层，所以TCP存在队头阻塞的问题。如下的缓冲区，如果3始终无法完成交付，那么会导致该TCP链接一直在处理3所述的应用层请求（通常是HTTP）。
+
 ![alt text](pic/quic/image5.png)
 
 # 2 Quic协议
@@ -105,38 +108,29 @@ TCP的处理依赖于操作系统，我们难以对它进行升级。虽然TCP�
 &ensp;&ensp;&ensp;&ensp;相较于TCP/IP使用五元组标识一条连接，QIUC在Connection层采用客户端随机产生的64位随机数作为Connection ID标识连接，这样IP或者端口发生变化时，只要ID 不变，这条连接依然维持，可以做到连接平滑迁移。
 
 &ensp;&ensp;&ensp;&ensp;连接建立时使用UDP端口号来识别指定机器上的特定server，而一旦建立，连接通过其connection ID关联。
-![alt text](pic/quic/image6.png)
+
+![alt text](pic/quic/0Rtt_link.drawio.svg)
 
 上图左边是HTTPS的一次完全握手的建连过程，需要3 个 RTT。就算是Session Resumption，也需要至少 2个 RTT。而 QUIC 由于建立在UDP 的基础上，同时又实现了 0RTT的安全握手，所以在大部分情况下，只需要0 个 RTT就能实现数据发送，在实现前向加密的基础上，并且 0RTT 的成功率相比TLS 的 Sesison Ticket要高很多。QUIC握手（handshake）合并了加密和传输参数的协商，只需要1-RTT 即可完成握手，提升了建立连接到交换应用程序数据的速度。第二次连接时，可以通过第一次连接时获取到的预共享密钥（pre-shared secret）立即发送数据（0-RTT）。
 
-- 安全传输
-&ensp;&ensp;&ensp;&ensp;QUIC的安全传输依赖TLS1.3，而boring ssl是众多quic实现的依赖库。协议对Packet的头部以及荷载均进行了保护(包括packet number)。TLS1.3提供了0-RTT的能力，在提供数据保护的同时，能在第一时间（服务端收到第一个请求报文时）就将Response Header发给客户端。大大降低了HTTP业务中的首包时间。为了支持0-RTT，客户端需要保存PSK信息，以及部分transport parament信息。
+- 安全传输: QUIC的安全传输依赖TLS1.3，而boring ssl是众多quic实现的依赖库。协议对Packet的头部以及荷载均进行了保护(包括packet number)。TLS1.3提供了0-RTT的能力，在提供数据保护的同时，能在第一时间（服务端收到第一个请求报文时）就将Response Header发给客户端。大大降低了HTTP业务中的首包时间。为了支持0-RTT，客户端需要保存PSK信息，以及部分transport parament信息。安全传输也经常会涉及到性能问题，在目前主流的服务端，AESG由于cpu提供了硬件加速，所以性能表现最好。CHACHA20则需要更多的CPU资源。在短视频业务上，出于对首帧的要求，通常直接使用明文传输。 Transport Paramenter(TP)协商是在安全传输的握手阶段完成，除了协议规定的TP外，用户也可以扩展私有TP内容，这一特性带来了很大的便利，比如：客户端可以利用tp告知服务端进行明文传输。
 
-&ensp;&ensp;&ensp;&ensp;安全传输也经常会涉及到性能问题，在目前主流的服务端，AESG由于cpu提供了硬件加速，所以性能表现最好。CHACHA20则需要更多的CPU资源。在短视频业务上，出于对首帧的要求，通常直接使用明文传输。
+- 可靠传输: QUIC协议是需要像TCP能够进行可靠传输，所以QUIC单独有一个rfc描述了丢包检测和拥塞控制的话题.
 
-&ensp;&ensp;&ensp;&ensp; Transport Paramenter(TP)协商是在安全传输的握手阶段完成，除了协议规定的TP外，用户也可以扩展私有TP内容，这一特性带来了很大的便利，比如：客户端可以利用tp告知服务端进行明文传输。
-
-- 可靠传输
-QUIC协议是需要像TCP能够进行可靠传输，所以QUIC单独有一个rfc描述了丢包检测和拥塞控制的话题，
-
-- 丢包检测：
-TCP 为了保证可靠性，使用了基于字节序号的 Sequence Number 及 Ack 来确认消息的有序到达。
-
-&ensp;&ensp;&ensp;&ensp;QUIC 同样是一个可靠的协议，它使用 Packet Number 代替了 TCP 的 sequence number，并且每个 Packet Number 都严格递增。而 TCP ，重传 segment 的 sequence number 和原始的 segment 的 Sequence Number 保持不变，也正是由于这个特性，引入了 TCP 重传的歧义问题。
-
-&ensp;&ensp;&ensp;&ensp;在普通的TCP里面，如果发送方收到三个重复的ACK就会触发快速重传，如果太久没收到ACK就会触发超时重传，而QUIC使用NACK (Negative Acknowledgement) 可以直接告知发送方哪些包丢了，不用等到超时重传。TCP有一个SACK的选项，也具备NACK的功能，QUIC的NACK有一个区别它每次重传的报文序号都是新的。
-
-&ensp;&ensp;&ensp;&ensp;但是单纯依靠严格递增的 Packet Number 肯定是无法保证数据的顺序性和可靠性。QUIC 又引入了一个 Stream Offset 的概念，即一个 Stream 可以经过多个 Packet 传输，Packet Number 严格递增，没有依赖。但是 Packet 里的 Payload 如果是 Stream 的话，就需要依靠 Stream 的 Offset 来保证应用数据的顺序。
+- 丢包检测：TCP为了保证可靠性，使用了基于字节序号的Sequence Number及Ack来确认消息的有序到达.QUIC 同样是一个可靠的协议，它使用 Packet Number 代替了 TCP 的 sequence number，并且每个 Packet Number 都严格递增。而 TCP ，重传 segment 的 sequence number 和原始的 segment 的 Sequence Number 保持不变，也正是由于这个特性，引入了 TCP 重传的歧义问题。在普通的TCP里面，如果发送方收到三个重复的ACK就会触发快速重传，如果太久没收到ACK就会触发超时重传，而QUIC使用NACK (Negative Acknowledgement) 可以直接告知发送方哪些包丢了，不用等到超时重传。TCP有一个SACK的选项，也具备NACK的功能，QUIC的NACK有一个区别它每次重传的报文序号都是新的。
+但是单纯依靠严格递增的 Packet Number 肯定是无法保证数据的顺序性和可靠性。QUIC 又引入了一个 Stream Offset 的概念，即一个 Stream 可以经过多个 Packet 传输，Packet Number 严格递增，没有依赖。但是 Packet 里的 Payload 如果是 Stream 的话，就需要依靠 Stream 的 Offset 来保证应用数据的顺序。
 
 - 拥塞控制：QUIC针对TCP协议中的一些缺陷，专门做了优化。QUIC 重新实现了TCP 协议的Cubic算法进行拥塞控制，并在此基础上做了不少改进。
 - 热插拔：tcp的拥塞控制需要内核态实现，而QUIC在用户态实现，因此QUIC 修改拥塞控制策略只需要在应用层操作，并且QUIC 会根据不同的网络环境、用户来动态选择拥塞控制算法。
 - 前向纠错 FEC：QUIC 使用前向纠错(FEC，Forward Error Correction)技术增加协议的容错性。一段数据被切分为10 个包后，依次对每个包进行异或运算，运算结果会作为 FEC 包与数据包一起被传输，当出现丢包时可根据剩余的包和FEC包推算出丢的包。
 - 单调递增的Packet Number
 
-![alt text](pic/quic/image7.png)
+![alt text](pic/quic/pkg_number1.drawio.svg)
 
-&ensp;&ensp;&ensp;&ensp; TCP 为了保证可靠性，使用Sequence Number 和 ACK确认消息是否有序到达，但这样的设计存在缺陷。超时发生后客户端发起重传，随后接收到了ACK确认，但因为原始请求和重传请求所返回的ACK 消息一样，所以客户端无法分辨此 ACK 对应的是原始请求还是重传请求。如果客户端认为是原始请求的ACK，但实际上是左图的情形，则计算的采样 RTT 偏大；如果客户端认为是重传请求的ACK，但实际上是右图的情形，又会导致采样 RTT 偏小。采样 RTT 会影响超时重传时间（Retransmission TimeOut）的 计算。
-![alt text](pic/quic/image8.png)
+&ensp;&ensp;&ensp;&ensp; TCP 为了保证可靠性，使用Sequence Number 和 ACK确认消息是否有序到达，但这样的设计存在缺陷。超时发生后客户端发起重传，随后接收到了ACK确认，但因为原始请求和重传请求所返回的ACK 消息一样，所以客户端无法分辨此 ACK 对应的是原始请求还是重传请求。如果客户端认为是原始请求的ACK，但实际上是左图的情形，则计算的采样 RTT 偏大；如果客户端认为是重传请求的ACK，但实际上是右图的情形，又会导致采样 RTT 偏小。采样 RTT 会影响超时重传时间（Retransmission TimeOut）的计算。
+
+![alt text](pic/quic/pkg_number2.drawio.svg)
+
 
 QUIC解决了上面的歧义问题。与采用Sequence Number 标记不同的是，其使用的Packet Number标记严格单调递增，如果 Packet N 丢失了，那么重传时 Packet 的标识不会是 N，而是比 N 大的数字，比如N+M，这样发送方接收到确认消息时就能方便地知道 ACK 对应的是原始请求还是重传请求。
 
@@ -162,7 +156,7 @@ TCP 会对每个 TCP 连接进行流量控制,通过滑动窗口进行实现。
 
 QUIC 的流量控制有两个级别：连接级别和Stream级别，用于表达接收端的接受能力。
 
-![alt text](pic/quic/image9.png)
+![alt text](pic/quic/stream.drawio.svg)
 
 &ensp;&ensp;&ensp;&ensp;单条 Stream的流量控制如上图所示。Stream 还没传输数据时，接收窗口（flow control receive window）就是最大接收窗口（flow control receive window），随着接收方接收到数据后，接收窗口不断缩小。在接收到的数据中，有的数据已被处理，而有的数据还没来得及被处理。蓝色块表示已处理数据，黄色块表示未处理数据，这部分数据的到来，使得Stream的接收窗口缩小。
 
@@ -188,13 +182,15 @@ QUIC 的流量控制有两个级别：连接级别和Stream级别，用于表达
 ```
 Long Header Packet{
   Header Form(1) = 1,   //1标识长报文头
-  Version-Specific Bits(7),
+  Fixed Bit (1) = 1,
+  Long Packet Type (2),
+  Type-Specific Bits (4),
   Version (32),                           // 端点可以使用此值来标识QUIC版本，保留0x0000000000用于版本协商
   Destination Connection ID Length(8),    //目标连接ID长度，8位无符号整形
-  Destination Connection ID(0..2040),     //目标连接ID，0-255个字节
+  Destination Connection ID(0..160),     //目标连接ID，0-20个字节
   Source Connection ID Length(8),         //源连接ID长度，8位无符号整
-  Source Connection ID(0..2040),          //源连接ID，0-255个字节
-  Version-Specific Data (..)              //特定于版本的内容
+  Source Connection ID(0..160),          //源连接ID，0-20个字节
+  Type-Specific Payload (..)              //特定于版本的内容
 }
 ```
 
